@@ -1,6 +1,6 @@
 import datetime,time, requests,json
 agentid=1000002
-secret='s's'
+secret='ss'
 corpid='xxx'
 
 def initialize(context):
