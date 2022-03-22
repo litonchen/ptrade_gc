@@ -1,7 +1,7 @@
 import datetime,time, requests,json
-agentid=1000002
-secret='ss'
-corpid='xxx'
+agentid=1000002  ## 企业微信
+secret='ss' ## 企业微信
+corpid='xxx'  ## 企业微信
 
 def initialize(context):
     # 初始化策略
@@ -108,7 +108,6 @@ def get_token(corpid, secret):
     return token
 
 def sendImg(agentid,media_id,access_token):
-    #print('media_id:',media_id)
     data = {
            "touser": "@all", 
            "toparty": "@all",         
