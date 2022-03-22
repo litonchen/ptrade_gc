@@ -1,0 +1,150 @@
+import datetime,time, requests,json
+agentid=1000002
+secret='s's'
+corpid='xxx'
+
+def initialize(context):
+    # 初始化策略
+    g.security = ["204001.SS","131810.SZ"]
+    set_universe(g.security)
+    run_daily(context, GC, time='14:55')
+    g.access_token=get_token(corpid, secret)
+    g.flag=0
+
+
+def handle_data(context, data):
+    # 取得当前的现金
+    portfolio_info =  context.portfolio
+    g.cash =  portfolio_info.cash    
+    
+    # 获取账户当日全部订单(交易函数)
+    g.all_orders=get_all_orders(security=None)
+    
+    # 获取当日成交订单
+    g.trades_info = get_trades()
+    
+    log.info(('tick开始： all orders %s'%g.all_orders))
+    log.info(('tick开始：original trade_info Z%s'%g.trades_info))   
+    log.info('tick开始：original cash  %s'%g.cash)      
+    
+    # 盘中盈亏监控
+    for holds in get_positions():
+        cost_basis=get_position(holds).cost_basis
+        last_sale_price=get_position(holds).last_sale_price
+        enable_amount=get_position(holds).enable_amount
+        # vol_ratio=get_snapshot(holds)['vol_ratio']
+        pnl_p=round((last_sale_price/cost_basis)-1,4)      
+        log.info('股票代码： %s'%holds)
+        log.info('可下单量： %s'%enable_amount)
+        log.info('最新持仓成本： %s'%cost_basis)
+        log.info('最新价格 %s'%last_sale_price)
+        log.info('盈亏：%s'%pnl_p)         
+        if pnl_p < -0.10 and enable_amount>0:
+            order_amount=-enable_amount
+            order_id=order(holds,order_amount)
+            log.info('order_id：%s'%order_id)
+            log.info('下单止损：%s'%holds)
+            log.info('下单量：%s'%order_amount)
+    g.HM = context.blotter.current_dt.strftime("%H:%M")
+    # 2：56 点取消所有订单，逆回购    
+    if g.HM == '14:56':
+        GC(context)
+
+######  自定义函数  ######    
+def GC(context):   
+    log.info('启动逆回购：')
+    portfolio_info =  context.portfolio
+    before_cash =  portfolio_info.cash 
+    send_txt(g.access_token,'撤单前可用资金:  %s'%before_cash) 
+    
+    for _order in get_all_orders():
+        if ( _order['status'] in ['2', '7']) & ( _order['entrust_bs']==1) :
+            log.info("撤销买入单： %s"% _order)
+            cancel_order_ex(_order)
+        
+    time.sleep(5)           
+    g.all_orders=get_all_orders(security=None)         
+    g.trades_info = get_trades()
+    g.cash =  portfolio_info.cash     
+    
+    log.info(('tick完成：adj all orders %s'%g.all_orders))
+    log.info(('tick完成：adj trade_info Z%s'%g.trades_info))    
+    log.info('tick完成：adj cash  %s'%g.cash)
+    send_txt(g.access_token,'本日交易:  %s'%g.trades_info) 
+    send_txt(g.access_token,'撤单:  %s'%g.all_orders) 
+    send_txt(g.access_token,'撤单后可用资金:  %s'%g.cash) 
+    
+    g.shiwan=int(g.cash/100000)    
+    if g.shiwan>0:            
+        order_id_gc=order('204001.SS',-1000* g.shiwan)
+        log.info(('下单卖出 204001.SS，单笔10万，笔数：%s'%g.shiwan))
+        
+    g.qian=int((g.cash-g.shiwan*100000)/1000) 
+  
+    if g.qian>0:
+        order_id_r=order('131810.SZ',-10* g.qian)     
+        log.info(('下单卖出 131810.SZ 单笔1千，笔数%s'%g.qian))    
+        
+    g.trades_info = get_trades()
+    log.info(g.trades_info)
+    time.sleep(5)
+    
+    g.cash =  portfolio_info.cash   
+    g.pnl = context.portfolio.pnl
+    
+    send_txt(g.access_token,'下单卖出 204001.SS，单笔10万，笔数：%s'%g.shiwan)
+    send_txt(g.access_token,'下单卖出 131810.SZ 单笔1千，笔数%s'%g.qian)   
+    send_txt(g.access_token,'逆回购后可用资金 %s'%g.cash)   
+    send_markdown(g.access_token)    
+    
+def get_token(corpid, secret):
+    Url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+    Data = {
+      "corpid": corpid,
+      "corpsecret": secret
+    }
+    r = requests.get(url=Url, params=Data)
+    token = r.json()['access_token']
+    return token
+
+def sendImg(agentid,media_id,access_token):
+    #print('media_id:',media_id)
+    data = {
+           "touser": "@all", 
+           "toparty": "@all",         
+           "msgtype" : "image",
+           "agentid" : agentid,
+           "image": {
+               "media_id": media_id
+           },
+           "safe":0
+        }
+    r = requests.post("https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={}".format(access_token), data=json.dumps(data))
+
+def send_txt(access_token,meg_txt) :
+    data = {
+           "touser": "@all", 
+           "toparty": "@all",         
+           "agentid" : agentid,
+           "msgtype": "text",  # 消息类型，此时固定为text
+           "text": {
+               "content": meg_txt,  # 文本内容，最长不超过2048个字节，必须是utf8编码
+                }
+    }
+    r = requests.post("https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={}".format(access_token), data=json.dumps(data))
+
+def send_markdown(access_token) :
+    send_data = {
+           "touser": "@all", 
+           "toparty": "@all",         
+           "agentid" : agentid,        
+           "msgtype": "markdown",  # 消息类型，此时固定为markdown
+           "markdown": {
+                       "content": "# **今日交易**<font color=\"warning\">**总结**</font>\n" +  # 标题 （支持1至6级标题，注意#与文字中间要有空格）
+                           "#### **浮动盈亏：{}**\n".format(g.pnl) +  # 加粗：**需要加粗的字**
+                           "> 本日交易：<font color=\"info\"> {} </font> \n".format(g.trades_info) +  # 引用：> 需要引用的文字
+                           "> 卖出204001，单笔十万：<font color=\"warning\">{} 十万</font> \n".format(g.shiwan)  +  # 字体颜色(只支持3种内置颜色)
+                           "> 卖出131810，单笔千元：<font color=\"warning\">{} 千元</font>".format(g.qian)   # 绿色：info、灰色：comment、橙红：warning
+                   }
+               }
+    r = requests.post("https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={}".format(access_token), data=json.dumps(send_data))
