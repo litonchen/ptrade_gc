@@ -7,7 +7,7 @@ def initialize(context):
     # 初始化策略
     g.security = ["204001.SS","131810.SZ"]
     set_universe(g.security)
-    run_daily(context, GC, time='14:55')
+    run_daily(context, GC, time='14:56')
     g.access_token=get_token(corpid, secret)
     g.flag=0
 
